@@ -1,3 +1,3 @@
-# ts-starter
+# ESLint Type Generator
 
-Template for starting typescript projects
+A library to generate TypeScript types for ESLint plugins.
