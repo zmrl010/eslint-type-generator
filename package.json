@@ -14,8 +14,8 @@
     "template"
   ],
   "devDependencies": {
-    "@zmrl/eslint-config": "^6.0.0",
     "@types/node": "^18.15.11",
+    "@zmrl/eslint-config": "^6.0.0",
     "eslint": "^8.38.0",
     "pnpm": "^8.2.0",
     "vitest": "^0.30.1"
@@ -24,6 +24,7 @@
     "@swc/core": "^1.3.49",
     "@typescript-eslint/parser": "^5.58.0",
     "@typescript-eslint/utils": "^5.58.0",
+    "dedented": "^1.0.0",
     "json-schema-to-typescript": "^12.0.0",
     "mkdirp": "^3.0.0",
     "prettier": "^2.8.7",

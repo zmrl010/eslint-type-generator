@@ -1,6 +1,6 @@
 #!/usr/bin/env ts-node
 
-import { generateRuleTypes } from "../src/generateRuleTypes.js";
+import { generateRuleTypes } from "../src/generate-rule-types.js";
 
 function parseArgs() {
   const [_execPath, _filePath, target] = process.argv;
