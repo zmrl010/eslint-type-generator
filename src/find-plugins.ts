@@ -23,7 +23,7 @@ async function getEslintCoreAsPlugin(): Promise<Plugin> {
 /**
  * Read dependencies from the closest packageJson
  */
-function readPackageDependencies(options: Options = {}) {
+function readDependencies(options: Options = {}) {
   return readPackageUpSync(options)?.packageJson?.dependencies ?? {};
 }
 
@@ -41,13 +41,25 @@ function isEslintPlugin(module: string): boolean {
 }
 
 /**
- * Derive plugin name by removing the eslint-plugin identifier
+ * Get plugin name from module name
  */
-function cleanPluginName(module: string): string {
+function getPluginName(module: string): string {
   return module
     .replace(/^eslint-plugin-/u, "")
     .replace(/\/eslint-plugin$/u, "")
     .replace(/\/eslint-plugin-/u, "/");
+}
+
+async function loadPlugin(module: string): Promise<Plugin> {
+  const name = getPluginName(module);
+
+  const { rules } = (await loadModule(module)) as TSESLint.Linter.Plugin;
+
+  return {
+    name,
+    module,
+    rules,
+  };
 }
 
 /**
@@ -56,21 +68,11 @@ function cleanPluginName(module: string): string {
  *
  * @returns array of all installed eslint plugins, including eslint core
  */
-export function loadEslintPlugins(): Promise<Plugin>[] {
-  const dependencies = readPackageDependencies();
+export function findPlugins(): Promise<Plugin>[] {
+  const dependencies = readDependencies();
 
   return Object.keys(dependencies)
     .filter(isEslintPlugin)
-    .map(async (module) => {
-      const name = cleanPluginName(module);
-
-      const plugin = (await loadModule(module)) as TSESLint.Linter.Plugin;
-
-      return {
-        name,
-        module,
-        rules: plugin.rules ? { ...plugin.rules } : null,
-      } as Plugin;
-    })
+    .map(loadPlugin)
     .concat(getEslintCoreAsPlugin());
 }

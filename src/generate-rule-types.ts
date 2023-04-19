@@ -3,7 +3,7 @@ import { mkdirp } from "mkdirp";
 import path from "path";
 import util from "util";
 import { GeneratorContext, GeneratorOptions, setupContext } from "./context.js";
-import { loadEslintPlugins, type Plugin } from "./find-plugins.js";
+import { findPlugins, type Plugin } from "./find-plugins.js";
 import { generateRuleTypeFiles } from "./generate-rule-type-files.js";
 import { formatText, toPascalCase } from "./text-utils.js";
 
@@ -24,6 +24,31 @@ function normalizeRule(
     },
     create: ruleCreator,
   };
+}
+
+function normalizeRules(initialRules: Plugin["rules"]): RuleRecord {
+  const rules: RuleRecord = {};
+
+  for (const [ruleName, rule] of Object.entries(initialRules ?? {})) {
+    if (typeof rule === "function") {
+      rules[ruleName] = {
+        defaultOptions: [],
+        meta: {
+          messages: {},
+          schema: {},
+          type: "suggestion",
+        },
+        create: rule,
+      };
+    } else if (rule.meta.deprecated === true) {
+      // skip deprecated rules
+      continue;
+    } else {
+      rules[ruleName] = rule;
+    }
+  }
+
+  return rules;
 }
 
 type RuleRecord = Record<string, TSESLint.RuleModule<string, unknown[]>>;
@@ -64,7 +89,7 @@ async function generatePluginIndexFile(
   `;
 
   context.write(
-    path.resolve(context.target, plugin.name, "index.ts"),
+    path.resolve(context.outDir, plugin.name, "index.ts"),
     formatText(textContent)
   );
 
@@ -79,19 +104,9 @@ async function processPlugin(context: GeneratorContext, plugin: Plugin) {
     return;
   }
 
-  const rules: RuleRecord = {};
-  for (const [ruleName, rule] of Object.entries(plugin.rules)) {
-    if (typeof rule === "function") {
-      rules[ruleName] = normalizeRule(rule);
-    } else if (rule.meta.deprecated === true) {
-      // skip deprecated rules
-      continue;
-    } else {
-      rules[ruleName] = rule;
-    }
-  }
+  const rules = normalizeRules(plugin.rules);
 
-  const pluginDir = path.resolve(context.target, plugin.name);
+  const pluginDir = path.resolve(context.outDir, plugin.name);
 
   await mkdirp(pluginDir);
 
@@ -104,7 +119,7 @@ export async function generateRuleTypes(
   options: GeneratorOptions
 ): Promise<void> {
   const context = setupContext(options);
-  const plugins = loadEslintPlugins();
+  const plugins = findPlugins();
 
   for await (const plugin of plugins) {
     processPlugin(context, plugin);
