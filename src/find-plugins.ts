@@ -2,14 +2,15 @@ import type { TSESLint } from "@typescript-eslint/utils";
 import { Options, readPackageUpSync } from "read-pkg-up";
 import { loadModule } from "./load-module.js";
 
-type PluginRules = TSESLint.Linter.Plugin["rules"] | null;
-
 export type Plugin = {
   name: string;
   module: string;
-  rules: PluginRules;
+  rules: TSESLint.Linter.Plugin["rules"];
 };
 
+/**
+ * Get core rules in the same shape as a plugin with rules
+ */
 async function getEslintCoreAsPlugin(): Promise<Plugin> {
   const { builtinRules } = await import("eslint/use-at-your-own-risk");
 
