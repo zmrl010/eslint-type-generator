@@ -3,9 +3,9 @@
 import { generateRuleTypes } from "../src/generate-rule-types.js";
 
 function parseArgs() {
-  const [_execPath, _filePath, target] = process.argv;
+  const [_execPath, _filePath, outDir] = process.argv;
 
-  return { target };
+  return { outDir };
 }
 
 export async function main() {
