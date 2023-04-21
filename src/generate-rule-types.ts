@@ -15,12 +15,6 @@ export type Rule = RuleModule & {
 };
 export type RuleRecord = Record<string, Rule>;
 
-function isRuleDeprecated(rule: {
-  meta: { deprecated?: boolean };
-}): rule is { meta: { deprecated: true } } {
-  return rule.meta.deprecated === true;
-}
-
 /**
  * Coerce an eslint rule into an object if it is a function-defined rule by
  * assigning to `rule.meta.create` and setting default values for other
@@ -45,16 +39,14 @@ function coerceRuleObject(
       create: rule,
     };
   }
-  return {
-    ...rule,
-    name,
-  };
+
+  return { ...rule, name };
 }
 
 function normalizeRules(initialRules: Plugin["rules"]): Rule[] {
   return Object.entries(initialRules ?? {})
     .map(([name, rule]) => coerceRuleObject(name, rule))
-    .filter((rule) => !isRuleDeprecated(rule));
+    .filter((rule) => rule.meta.deprecated !== true);
 }
 
 async function generatePluginIndexFile(
@@ -64,25 +56,25 @@ async function generatePluginIndexFile(
 ) {
   const ruleNames = rules.map(({ name }) => ({
     name,
-    safeName: toPascalCase(name.replace(`${plugin.name}/`, "")),
+    safeName: toPascalCase(name.replace(`${plugin.shortName}/`, "")),
   }));
 
-  const rulePrefix = plugin.name === "eslint" ? "" : `${plugin.name}/`;
+  const rulePrefix =
+    plugin.shortName === "eslint" ? "" : `${plugin.shortName}/`;
 
-  const filePath = path.resolve(context.outDir, plugin.name, "index.ts");
+  const filePath = path.resolve(context.outDir, plugin.shortName, "index.ts");
 
   const textContent = `
     ${ruleNames
       .map(
-        (rule) =>
-          `import type { ${rule.safeName} } from '../${plugin.name}/${rule.name}.js';`
+        (rule) => `import type { ${rule.safeName} } from './${rule.name}.js';`
       )
       .join("\n")}
 
     /**
-     * ${plugin.module} Rules
+     * ${plugin.name} Rules
      */
-    export interface ${toPascalCase(plugin.name)} {
+    export interface ${toPascalCase(plugin.shortName)} {
       ${ruleNames
         .map((rule) => `'${rulePrefix}${rule.name}': ${rule.safeName};`)
         .join("\n")}
@@ -91,11 +83,11 @@ async function generatePluginIndexFile(
 
   await context.writeFormatted(filePath, textContent);
 
-  debug("Wrote types for ", plugin.module);
+  debug("Wrote types for ", plugin.name);
 }
 
 async function processPlugin(context: GeneratorContext, plugin: Plugin) {
-  debug(`processing plugin \`%s\``, plugin.module);
+  debug(`processing plugin \`%s\``, plugin.name);
 
   if (!plugin.rules) {
     debug(`no rules found. skipping...`);
@@ -104,7 +96,7 @@ async function processPlugin(context: GeneratorContext, plugin: Plugin) {
 
   const rules = normalizeRules(plugin.rules);
 
-  const pluginDir = path.resolve(context.outDir, plugin.name);
+  const pluginDir = path.resolve(context.outDir, plugin.shortName);
 
   await mkdirp(pluginDir);
 

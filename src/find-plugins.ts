@@ -2,9 +2,25 @@ import type { TSESLint } from "@typescript-eslint/utils";
 import { Options, readPackageUpSync } from "read-pkg-up";
 import { loadModule } from "./load-module.js";
 
+/**
+ * Eslint plugin object
+ *
+ * @example
+ * const sveltePlugin = {
+ *   name: 'eslint-plugin-svelte',
+ *   shortName: 'svelte'
+ *   rules: {...}
+ * } satisfies Plugin
+ */
 export type Plugin = {
+  /**
+   * Shortened plugin name (if applicable)
+   */
+  shortName: string;
+  /**
+   * Plugin name - should match module name
+   */
   name: string;
-  module: string;
   rules: TSESLint.Linter.Plugin["rules"];
 };
 
@@ -15,9 +31,9 @@ async function getEslintCoreAsPlugin(): Promise<Plugin> {
   const { builtinRules } = await import("eslint/use-at-your-own-risk");
 
   return {
-    module: "eslint",
-    rules: Object.fromEntries(builtinRules.entries()),
     name: "eslint",
+    rules: Object.fromEntries(builtinRules.entries()),
+    shortName: "eslint",
   };
 }
 
@@ -42,23 +58,23 @@ function isEslintPlugin(module: string): boolean {
 }
 
 /**
- * Get plugin name from module name
+ * Get plugin name stripped of generic plugin naming conventions
  */
-function getPluginName(module: string): string {
-  return module
+function stripPluginName(name: string): string {
+  return name
     .replace(/^eslint-plugin-/u, "")
     .replace(/\/eslint-plugin$/u, "")
     .replace(/\/eslint-plugin-/u, "/");
 }
 
-async function loadPlugin(module: string): Promise<Plugin> {
-  const name = getPluginName(module);
+async function loadPlugin(name: string): Promise<Plugin> {
+  const shortName = stripPluginName(name);
 
-  const { rules } = (await loadModule(module)) as TSESLint.Linter.Plugin;
+  const { rules } = (await loadModule(name)) as TSESLint.Linter.Plugin;
 
   return {
+    shortName,
     name,
-    module,
     rules,
   };
 }
