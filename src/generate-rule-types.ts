@@ -1,119 +1,164 @@
-import type { TSESLint } from "@typescript-eslint/utils";
-import { mkdirp } from "mkdirp";
+import type { JSONSchema } from "@typescript-eslint/utils";
+import { compile } from "json-schema-to-typescript";
 import path from "path";
-import util from "util";
-import { GeneratorContext, GeneratorOptions, setupContext } from "./context.js";
-import { findPlugins, type Plugin } from "./find-plugins.js";
-import { generateRuleTypeFiles } from "./generate-rule-type-files.js";
+import type { GeneratorContext } from "./context.js";
+import type { Rule } from "./rule.js";
 import { toPascalCase } from "./text-utils.js";
 
-const debug = util.debuglog("generate-types");
+type Schema = JSONSchema.JSONSchema4;
 
-export type RuleModule = TSESLint.RuleModule<string, unknown[]>;
-export type Rule = RuleModule & {
-  name: string;
+async function compileSchema(
+  typeName: string,
+  schema: Schema
+): Promise<string> {
+  const code = await compile(schema, typeName, {
+    bannerComment: "",
+    format: false,
+    strictIndexSignatures: true,
+    enableConstEnums: false,
+  });
+
+  return code.replace(`${typeName} =`, `${typeName} = 'off' |`);
+}
+
+const ruleLevelString = {
+  enum: ["off", "error", "warn"],
 };
-export type RuleRecord = Record<string, Rule>;
 
-/**
- * Coerce an eslint rule into an object if it is a function-defined rule by
- * assigning to `rule.meta.create` and setting default values for other
- * expected properties. If it is already an object, it will be returned as is.
- *
- * Function rule definitions are technically deprecated by Eslint but
- * its still possible we could import one.
- */
-function coerceRuleObject(
-  name: string,
-  rule: RuleModule | TSESLint.RuleCreateFunction
-): Rule {
-  if (typeof rule === "function") {
-    return {
-      name,
-      defaultOptions: [],
-      meta: {
-        messages: {},
-        schema: {},
-        type: "suggestion",
-      },
-      create: rule,
+function adjustSchema(schema: Schema): Schema {
+  if (schema.anyOf != null) {
+    for (const subSchema of schema.anyOf) {
+      adjustSchema(subSchema);
+    }
+
+    return schema;
+  }
+
+  if (Array.isArray(schema.prefixItems)) {
+    // some rules use prefixItems instead of items. we can treat them as items
+    schema.items = [schema.prefixItems, schema.items ?? []].flat();
+  }
+
+  if (Array.isArray(schema.items)) {
+    // work around shared / nested schemas
+    if (schema.items[0] !== ruleLevelString) {
+      schema.items.unshift(ruleLevelString);
+    }
+  } else if (schema.items !== undefined) {
+    if (schema.items.oneOf != null || schema.items.anyOf != null) {
+      const additionalItems = schema.items;
+      schema.items = [ruleLevelString];
+      schema.additionalItems = additionalItems;
+    } else {
+      schema.items = [ruleLevelString, schema.items];
+    }
+  } else {
+    schema = {
+      type: "array",
+      items: [ruleLevelString, schema],
     };
   }
 
-  return { ...rule, name };
+  if (typeof schema.minItems === "number") {
+    schema.minItems += 1;
+  } else {
+    schema.minItems = 1;
+  }
+
+  if (typeof schema.maxItems === "number") {
+    schema.maxItems += 1;
+  }
+
+  return schema;
 }
 
-function normalizeRules(initialRules: Plugin["rules"]): Rule[] {
-  return Object.entries(initialRules ?? {})
-    .map(([name, rule]) => coerceRuleObject(name, rule))
-    .filter((rule) => rule.meta.deprecated !== true);
+function isRefValue(val: unknown): val is string {
+  return typeof val === "string" && val.startsWith("#/");
 }
 
-async function generatePluginIndexFile(
-  context: GeneratorContext,
-  plugin: Plugin,
-  rules: Rule[]
-) {
-  const ruleNames = rules.map(({ name }) => ({
-    name,
-    safeName: toPascalCase(name.replace(`${plugin.shortName}/`, "")),
-  }));
-
-  const rulePrefix =
-    plugin.shortName === "eslint" ? "" : `${plugin.shortName}/`;
-
-  const filePath = path.resolve(context.outDir, plugin.shortName, "index.ts");
-
-  const textContent = `
-    ${ruleNames
-      .map(
-        (rule) => `import type { ${rule.safeName} } from './${rule.name}.js';`
-      )
-      .join("\n")}
-
-    /**
-     * ${plugin.name} Rules
-     */
-    export interface ${toPascalCase(plugin.shortName)} {
-      ${ruleNames
-        .map((rule) => `'${rulePrefix}${rule.name}': ${rule.safeName};`)
-        .join("\n")}
-    }
-  `;
-
-  await context.writeFormatted(filePath, textContent);
-
-  debug("Wrote types for ", plugin.name);
-}
-
-async function processPlugin(context: GeneratorContext, plugin: Plugin) {
-  debug(`processing plugin \`%s\``, plugin.name);
-
-  if (!plugin.rules) {
-    debug(`no rules found. skipping...`);
+function recursivelyFixRefs(
+  schema: Schema | string | null | boolean,
+  index: number
+): void {
+  if (schema == null || typeof schema !== "object") {
     return;
   }
 
-  const rules = normalizeRules(plugin.rules);
+  for (const key in schema) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- known safe
+    const current = schema[key];
+    if (current == null) {
+      continue;
+    }
 
-  const pluginDir = path.resolve(context.outDir, plugin.shortName);
+    if (Array.isArray(current)) {
+      current.forEach((subSchema, i) => {
+        recursivelyFixRefs(subSchema, i);
+      });
+    } else if (key === "$ref" && isRefValue(current)) {
+      schema[key] = `#/items/${index + 1}/${current.substring(2)}`;
+    } else if (typeof current === "object") {
+      recursivelyFixRefs(current, index);
+    }
+  }
+}
 
-  await mkdirp(pluginDir);
+type RuleSchema = Schema | readonly Schema[];
 
-  await generateRuleTypeFiles(context, rules, pluginDir);
+function normalizeSchema(schema: RuleSchema): Schema {
+  if (Array.isArray(schema)) {
+    const schemaArray: Schema[] = schema;
 
-  await generatePluginIndexFile(context, plugin, rules);
+    schema.forEach((ref, i) => {
+      recursivelyFixRefs(ref, i);
+    });
+
+    return {
+      type: "array",
+      items: [ruleLevelString, ...schemaArray],
+      minItems: 1,
+    };
+  }
+
+  return adjustSchema(schema);
+}
+
+/**
+ * Generate rule type definitions as a string
+ */
+async function generateRuleTypeDef(rule: Rule): Promise<string> {
+  const typeName = toPascalCase(rule.name);
+  const schema = normalizeSchema(rule.meta?.schema ?? []);
+
+  const { docs } = rule.meta;
+  if (docs) {
+    schema.description = docs.description;
+
+    if (docs.url) {
+      schema.description += `\n@see${docs.url}`;
+    }
+  }
+
+  return compileSchema(typeName, schema);
 }
 
 export async function generateRuleTypes(
-  options: GeneratorOptions
+  context: GeneratorContext,
+  rules: Rule[],
+  directory: string
 ): Promise<void> {
-  const context = setupContext(options);
-  const plugins = findPlugins();
+  for await (const rule of rules) {
+    const ruleTypeDef = await generateRuleTypeDef(rule);
 
-  for await (const plugin of plugins) {
-    processPlugin(context, plugin);
+    const filepath = path.resolve(directory, `${rule.name}.ts`);
+
+    context.writeFormatted(filepath, ruleTypeDef);
+
+    console.info(
+      "Successfully wrote ",
+      rule.name,
+      " types to:\n",
+      path.relative(context.cwd, filepath)
+    );
   }
-
-  console.info("Done!");
 }

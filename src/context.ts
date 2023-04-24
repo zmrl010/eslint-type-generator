@@ -50,12 +50,14 @@ export interface GeneratorConfig {
 
 export type GeneratorOptions = Partial<GeneratorConfig>;
 
-export type GeneratorContext = {
-  /**
-   * Write formatted text to output
-   */
-  writeFormatted: (path: string, text: string) => Promise<void>;
-} & GeneratorConfig;
+export type GeneratorContext = Readonly<
+  {
+    /**
+     * Write formatted text to output
+     */
+    writeFormatted: (path: string, text: string) => Promise<void>;
+  } & GeneratorConfig
+>;
 
 /**
  * Resolve input options into a complete context
@@ -66,7 +68,7 @@ export function setupContext({
   write = fs.writeFile,
   format = formatText,
   outDir = "types/",
-}: GeneratorOptions): Readonly<GeneratorContext> {
+}: GeneratorOptions): GeneratorContext {
   if (cwd !== process.cwd()) {
     process.chdir(cwd);
   }
