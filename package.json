@@ -1,5 +1,5 @@
 {
-  "name": "ts-template",
+  "name": "eslint-generate-types",
   "version": "0.1.0",
   "description": "A template repo for new typescript projects",
   "type": "module",
@@ -11,7 +11,8 @@
   ],
   "keywords": [
     "typescript",
-    "template"
+    "eslint",
+    "utility"
   ],
   "devDependencies": {
     "@types/node": "^18.15.11",
